@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy
+  namespace: observability
+  labels:
+    app.kubernetes.io/component: config
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/part-of: alloy
+    app.kubernetes.io/version: v1.9.1
+    helm.sh/chart: alloy-1.1.1
+  annotations:
+    meta.helm.sh/release-name: alloy
+    meta.helm.sh/release-namespace: observability
+data:
+  config.alloy: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+
+    // Descoberta de recursos Kubernetes
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+    discovery.kubernetes "nodes" {
+      role = "node"
+    }
+    discovery.kubernetes "services" {
+      role = "service"
+    }
+    discovery.kubernetes "endpoints" {
+      role = "endpoints"
+    }
+    discovery.kubernetes "endpointslices" {
+      role = "endpointslice"
+    }
+    discovery.kubernetes "ingresses" {
+      role = "ingress"
+    }
+
+    // Relabel para logs de pods
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+
+      // Ignorar pods terminados
+      rule {
+        source_labels = ["__meta_kubernetes_pod_phase"]
+        regex         = "Pending|Succeeded|Failed|Completed"
+        action        = "drop"
+      }
+
+      // Ignorar namespaces de sistema (opcional)
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        regex         = "kube-system|kube-public|kube-node-lease"
+        action        = "drop"
+      }
+
+      // Adicionar labels úteis
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_node_name"]
+        target_label  = "node"
+      }
+    }
+
+    // Processamento de logs
+    loki.process "clean_logs" {
+      forward_to = [loki.write.default.receiver]
+
+      stage.json {
+        expressions = {
+          level = "level",
+          msg   = "msg",
+        }
+      }
+    }
+
+    // Coleta dos logs dos pods
+    loki.source.kubernetes "pod_logs" {
+      targets    = discovery.relabel.pod_logs.output
+      forward_to = [loki.process.clean_logs.receiver]
+    }
+
+    // ENVIO PARA LOKI (sem configurações de backoff)
+    loki.write "default" {
+      endpoint {
+        url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+        batch_wait = "1s"
+        batch_size = "1MB"
+      }
+
+      external_labels = {
+        cluster = "rancher-cluster",
+        job     = "alloy/kubernetes-pods",
+      }
+    }

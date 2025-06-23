@@ -1,0 +1,69 @@
+mode: SingleBinary
+
+loki:
+  auth_enabled: false
+  storage:
+    type: s3
+    s3:
+      endpoint: https://minio.rancher.pointertech.digital
+      bucketnames: loki
+      access_key_id: lokiadmin         # substitua pela sua chave
+      secret_access_key: lokipassword  # substitua pela sua senha
+      s3forcepathstyle: true
+      insecure: false  # true se você não tiver TLS no MinIO
+
+  schema_config:
+    configs:
+      - from: 2024-01-01
+        store: boltdb-shipper
+        object_store: s3
+        schema: v12
+        index:
+          prefix: index_
+          period: 24h
+
+  compactor:
+    retention_enabled: true
+
+  limits_config:
+    retention_period: 168h  # 7 dias
+    volume_enabled: true
+    ingestion_rate_mb: 10
+    ingestion_burst_size_mb: 20
+    max_query_parallelism: 32
+    max_streams_per_user: 10000
+
+  rulerConfig:
+    alertmanager_url: http://10.42.30.75:9093
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: longhorn
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    runAsNonRoot: true
+
+service:
+  type: ClusterIP
+
+# desabilita componentes que não serão usados nesse momento
+prometheus:
+  enabled: false
+alertmanager:
+  enabled: false
+grafana:
+  enabled: false
+promtail:
+  enabled: false
